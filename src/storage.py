@@ -8,13 +8,18 @@ class FinanceStorage:
         self.filename = filename
         self.budget_filename = filename.replace("_finance.csv", "_budget.csv")
         
+        # --- МАГИЯ: СОЗДАЕМ ПАПКУ, ЕСЛИ ЕЁ НЕТ ---
+        directory = os.path.dirname(filename)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+        # -----------------------------------------
+        
     def _load_data(self):
         if os.path.exists(self.filename):
-            # Добавили 'note' в список колонок при чтении, если вдруг файл старый
             df = pd.read_csv(self.filename, parse_dates=['date'])
             if 'note' not in df.columns:
-                df['note'] = "" # Миграция для старых файлов
-            return df.fillna("") # Заменяем пустые значения на пустые строки
+                df['note'] = "" 
+            return df.fillna("")
         else:
             return pd.DataFrame(columns=["date", "category", "amount", "note"])
 
@@ -30,7 +35,12 @@ class FinanceStorage:
         }
         
         new_df = pd.DataFrame([new_row])
-        df = pd.concat([df if not df.empty else None, new_df], ignore_index=True)
+        # Исправляем warning про concat
+        if df.empty:
+            df = new_df
+        else:
+            df = pd.concat([df, new_df], ignore_index=True)
+            
         df.to_csv(self.filename, index=False)
 
     def delete_last_expense(self):
@@ -48,15 +58,11 @@ class FinanceStorage:
         return df.tail(n).iloc[::-1].to_dict('records')
 
     def search_records(self, query):
-        """Поиск по категории или заметке"""
         df = self._load_data()
         if df.empty:
             return []
         
-        # Приводим к нижнему регистру для поиска
         query = query.lower()
-        
-        # Ищем совпадения в категории ИЛИ в заметке
         mask = (df['category'].str.lower().str.contains(query)) | \
                (df['note'].str.lower().str.contains(query))
                
@@ -77,7 +83,7 @@ class FinanceStorage:
             return {}
         return filtered_df.groupby("category")["amount"].sum().to_dict()
 
-    # --- БЮДЖЕТ И ПРОГНОЗЫ ---
+    # --- БЮДЖЕТ ---
     
     def set_budget(self, amount):
         now = datetime.now()
@@ -85,6 +91,7 @@ class FinanceStorage:
         
         if os.path.exists(self.budget_filename):
             history = pd.read_csv(self.budget_filename)
+            # Удаляем старую запись за этот месяц
             history = history[~((history['year'] == now.year) & (history['month'] == now.month))]
             history = pd.concat([history, new_data], ignore_index=True)
             history.to_csv(self.budget_filename, index=False)
@@ -94,7 +101,6 @@ class FinanceStorage:
     def get_budget_status(self):
         now = datetime.now()
         
-        # 1. Берем бюджет
         budget_amount = 0.0
         if os.path.exists(self.budget_filename):
             budgets = pd.read_csv(self.budget_filename)
@@ -102,19 +108,13 @@ class FinanceStorage:
             if not row.empty:
                 budget_amount = row.iloc[0]['amount']
 
-        # 2. Считаем траты
         stats = self.get_stats_by_month(now.year, now.month)
         spent_amount = sum(stats.values()) if stats else 0.0
         remaining = budget_amount - spent_amount
         
-        # 3. Считаем "Денег в день" (Daily Allowence)
-        # Сколько дней осталось в месяце?
         days_in_month = calendar.monthrange(now.year, now.month)[1]
         days_left = days_in_month - now.day
-        
-        # Если сегодня последний день, ставим 1, чтобы не делить на 0
-        if days_left == 0: 
-            days_left = 1
+        if days_left == 0: days_left = 1
             
         daily_limit = remaining / days_left
         
