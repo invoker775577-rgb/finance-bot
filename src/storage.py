@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import json
 import calendar
 from datetime import datetime
 
@@ -7,13 +8,32 @@ class FinanceStorage:
     def __init__(self, filename):
         self.filename = filename
         self.budget_filename = filename.replace("_finance.csv", "_budget.csv")
+        self.config_filename = filename.replace("_finance.csv", "_config.json")
         
-        # --- МАГИЯ: СОЗДАЕМ ПАПКУ, ЕСЛИ ЕЁ НЕТ ---
+        # Создаем папку data, если нет
         directory = os.path.dirname(filename)
         if directory and not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
-        # -----------------------------------------
-        
+            
+    # --- РАБОТА С КОНФИГОМ (ВАЛЮТА) ---
+    def set_currency(self, currency_symbol):
+        """Сохраняет валюту пользователя"""
+        config = {"currency": currency_symbol}
+        with open(self.config_filename, "w", encoding="utf-8") as f:
+            json.dump(config, f)
+
+    def get_currency(self):
+        """Читает валюту (по умолчанию $)"""
+        if os.path.exists(self.config_filename):
+            try:
+                with open(self.config_filename, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    return config.get("currency", "$")
+            except:
+                return "$"
+        return "$"
+
+    # --- РАБОТА С ДАННЫМИ ---
     def _load_data(self):
         if os.path.exists(self.filename):
             df = pd.read_csv(self.filename, parse_dates=['date'])
@@ -35,7 +55,6 @@ class FinanceStorage:
         }
         
         new_df = pd.DataFrame([new_row])
-        # Исправляем warning про concat
         if df.empty:
             df = new_df
         else:
@@ -70,8 +89,11 @@ class FinanceStorage:
         return results.tail(10).iloc[::-1].to_dict('records')
 
     def reset_data(self):
+        # Удаляем CSV и бюджет, но конфиг (валюту) оставляем
         empty_df = pd.DataFrame(columns=["date", "category", "amount", "note"])
         empty_df.to_csv(self.filename, index=False)
+        if os.path.exists(self.budget_filename):
+            os.remove(self.budget_filename)
 
     def get_stats_by_month(self, year, month):
         df = self._load_data()
@@ -84,14 +106,12 @@ class FinanceStorage:
         return filtered_df.groupby("category")["amount"].sum().to_dict()
 
     # --- БЮДЖЕТ ---
-    
     def set_budget(self, amount):
         now = datetime.now()
         new_data = pd.DataFrame([{"year": now.year, "month": now.month, "amount": float(amount)}])
         
         if os.path.exists(self.budget_filename):
             history = pd.read_csv(self.budget_filename)
-            # Удаляем старую запись за этот месяц
             history = history[~((history['year'] == now.year) & (history['month'] == now.month))]
             history = pd.concat([history, new_data], ignore_index=True)
             history.to_csv(self.budget_filename, index=False)
@@ -125,3 +145,4 @@ class FinanceStorage:
             "days_left": days_left,
             "daily_limit": daily_limit
         }
+

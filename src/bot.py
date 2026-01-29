@@ -8,7 +8,6 @@ from src.parser import parse_input
 from src.storage import FinanceStorage
 from src.visualizer import create_pie_chart
 
-# 1. Загрузка окружения
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -20,44 +19,88 @@ bot = telebot.TeleBot(TOKEN)
 def get_user_storage(user_id):
     return FinanceStorage(f"data/{user_id}_finance.csv")
 
-# --- ГЛАВНАЯ ФИШКА: НАСТРОЙКА КНОПКИ MENU ---
 def set_main_menu():
-    """Создает синюю кнопку Menu слева внизу"""
     commands = [
-        BotCommand("stats", "📊 Статистика и бюджет"),
-        BotCommand("records", "📋 Последние 10 трат"),
-        BotCommand("salary", "💰 Установить бюджет"),
-        BotCommand("history", "📅 История / Excel"),
-        BotCommand("search", "🔍 Поиск по базе"),
+        BotCommand("start", "🏠 Главное меню"),
+        BotCommand("stats", "📊 Статистика и лимиты"),
+        BotCommand("currency", "💱 Сменить валюту"),
+        BotCommand("salary", "💰 Задать зарплату"),
+        BotCommand("records", "📋 Список трат"),
+        BotCommand("search", "🔍 Поиск"),
         BotCommand("undo", "🔙 Отмена записи"),
-        BotCommand("reset", "🗑 Сброс данных"),
-        BotCommand("help", "ℹ️ Помощь")
+        BotCommand("history", "📅 Архив / Excel"),
+        BotCommand("reset", "🗑 Сброс данных")
     ]
     bot.set_my_commands(commands)
 
-# --- КОМАНДЫ ---
+# --- НОВЫЙ КРУТОЙ СТАРТ ---
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
+    user_name = message.from_user.first_name
+    storage = get_user_storage(message.chat.id)
+    cur = storage.get_currency()
+    
     text = (
-        "**FinBot v3.0**\n\n"
-        "**Добавить трату:**\n"
-        "`Категория Сумма [Комментарий]`\n"
-        "Пример: `Такси 500` или `Обед 12.50 бизнес-ланч`\n\n"
-        "👇 **Все команды теперь в кнопке Menu слева внизу.**"
+        f"👋 **Привет, {user_name}!**\n\n"
+        "Я здесь, чтобы твои деньги не исчезали в никуда. "
+        "Я простой, быстрый и не задаю лишних вопросов.\n\n"
+        "🚀 **Как пользоваться:**\n"
+        "1. **Пиши траты как есть:**\n"
+        f"   `Такси 500` или `Обед 1250 бизнес ланч`\n"
+        "2. **Следи за лимитом:**\n"
+        f"   Задай бюджет `/salary 50000`, и я скажу, сколько можно тратить в день.\n"
+        "3. **Анализируй:**\n"
+        "   Жми `/stats` — покажу графики и остаток.\n\n"
+        f"💱 **Твоя валюта сейчас:** `{cur}`\n"
+        "(Чтобы сменить на рубли, динары или евро — жми `/currency`)\n\n"
+        "👇 **Меню команд — в кнопке слева внизу.**"
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
+# --- СМЕНА ВАЛЮТЫ ---
+
+@bot.message_handler(commands=['currency'])
+def change_currency_menu(message):
+    markup = InlineKeyboardMarkup()
+    # Популярные валюты
+    btn1 = InlineKeyboardButton("🇺🇸 USD ($)", callback_data="set_cur_$")
+    btn2 = InlineKeyboardButton("🇪🇺 EUR (€)", callback_data="set_cur_€")
+    btn3 = InlineKeyboardButton("🇷🇺 RUB (₽)", callback_data="set_cur_₽")
+    btn4 = InlineKeyboardButton("🇷🇸 RSD (din)", callback_data="set_cur_din")
+    btn5 = InlineKeyboardButton("🇧🇾 BYN (Br)", callback_data="set_cur_Br")
+    btn6 = InlineKeyboardButton("🇺🇦 UAH (₴)", callback_data="set_cur_₴")
+    
+    markup.add(btn1, btn2)
+    markup.add(btn3, btn4)
+    markup.add(btn5, btn6)
+    
+    bot.send_message(message.chat.id, "💱 **В чем будем считать деньги?**\nВыберите из списка:", reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("set_cur_"))
+def callback_set_currency(call):
+    # Получаем символ из callback_data (например set_cur_din -> din)
+    symbol = call.data.split("_")[2]
+    storage = get_user_storage(call.message.chat.id)
+    storage.set_currency(symbol)
+    
+    bot.answer_callback_query(call.id, f"Валюта установлена: {symbol}")
+    bot.edit_message_text(f"✅ Готово! Теперь считаем в **{symbol}**.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+
+# --- ОСТАЛЬНЫЕ КОМАНДЫ (С УЧЕТОМ ВАЛЮТЫ) ---
+
 @bot.message_handler(commands=['salary'])
 def set_salary(message):
+    storage = get_user_storage(message.chat.id)
+    cur = storage.get_currency()
     try:
         args = message.text.split()
         if len(args) < 2:
-            bot.reply_to(message, "Формат: `/salary 2000`", parse_mode="Markdown")
+            bot.reply_to(message, f"⚠️ Пример: `/salary 50000`", parse_mode="Markdown")
             return
         amount = float(args[1].replace(",", "."))
-        get_user_storage(message.chat.id).set_budget(amount)
-        bot.reply_to(message, f"✅ Бюджет на месяц: **{amount} $**", parse_mode="Markdown")
+        storage.set_budget(amount)
+        bot.reply_to(message, f"✅ Бюджет на месяц: **{amount:,.0f} {cur}**", parse_mode="Markdown")
     except ValueError:
         bot.reply_to(message, "Ошибка: сумма должна быть числом.")
 
@@ -71,12 +114,15 @@ def undo_last(message):
 @bot.message_handler(commands=['search'])
 def search_expenses(message):
     args = message.text.split(maxsplit=1)
+    storage = get_user_storage(message.chat.id)
+    cur = storage.get_currency()
+    
     if len(args) < 2:
-        bot.reply_to(message, "Формат: `/search текст`", parse_mode="Markdown")
+        bot.reply_to(message, "🔍 Пример: `/search такси`", parse_mode="Markdown")
         return
     
     query = args[1]
-    results = get_user_storage(message.chat.id).search_records(query)
+    results = storage.search_records(query)
     
     if not results:
         bot.reply_to(message, "Ничего не найдено.")
@@ -87,24 +133,26 @@ def search_expenses(message):
     for r in results:
         date_str = r['date'].strftime("%d.%m")
         note = f" ({r['note']})" if r['note'] else ""
-        text += f"{date_str} | {r['category']} | {r['amount']} ${note}\n"
+        text += f"{date_str} | {r['category']} | {r['amount']} {cur}{note}\n"
         total += r['amount']
         
-    text += f"\nИтого: **{total} $**"
+    text += f"\nИтого: **{total} {cur}**"
     bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
 @bot.message_handler(commands=['records'])
 def show_records(message):
-    records = get_user_storage(message.chat.id).get_last_records(10)
+    storage = get_user_storage(message.chat.id)
+    cur = storage.get_currency()
+    records = storage.get_last_records(10)
     if not records:
         bot.send_message(message.chat.id, "Список пуст.")
         return
         
-    text = "📋 **Последние операции:**\n"
+    text = f"📋 **Последние операции ({cur}):**\n"
     for r in records:
         date_str = r['date'].strftime("%d.%m %H:%M")
         note = f" _{r['note']}_" if r['note'] else ""
-        text += f"`{date_str}` | {r['category']} | {r['amount']} ${note}\n"
+        text += f"`{date_str}` | {r['category']} | {r['amount']} {cur}{note}\n"
         
     bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
@@ -112,6 +160,7 @@ def show_records(message):
 def send_stats(message):
     user_id = message.chat.id
     storage = get_user_storage(user_id)
+    cur = storage.get_currency() # Узнаем валюту
     now = datetime.datetime.now()
     
     stats = storage.get_stats_by_month(now.year, now.month)
@@ -122,7 +171,8 @@ def send_stats(message):
         return
 
     try:
-        chart_file = create_pie_chart(stats)
+        # Передаем валюту в генератор графика
+        chart_file = create_pie_chart(stats, currency_symbol=cur)
         
         spent = budget_data['spent']
         budget = budget_data['budget']
@@ -130,21 +180,22 @@ def send_stats(message):
         daily = budget_data['daily_limit']
         
         caption = f"📊 **{now.strftime('%m.%Y')}**\n"
-        caption += f"Расход: **{spent} $**\n"
+        caption += f"Расход: **{spent:,.2f} {cur}**\n"
         
         if budget > 0:
-            caption += f"Бюджет: {budget} $\n"
+            caption += f"Бюджет: {budget:,.0f} {cur}\n"
             if rem > 0:
-                caption += f"Остаток: **{rem:.2f} $**\n"
-                caption += f"Лимит на день: **{daily:.2f} $**"
+                caption += f"Остаток: **{rem:,.2f} {cur}**\n"
+                caption += f"Лимит на день: **{daily:,.2f} {cur}**"
             else:
-                caption += f"Перерасход: **{abs(rem):.2f} $**"
+                caption += f"Перерасход: **{abs(rem):,.2f} {cur}** 😱"
                 
         bot.send_photo(user_id, photo=chart_file, caption=caption, parse_mode="Markdown")
-    except Exception:
+    except Exception as e:
+        print(f"Error stats: {e}")
         bot.send_message(user_id, "Ошибка построения отчета.")
 
-# --- UI КНОПКИ ---
+# --- КНОПКИ СБРОСА И ИСТОРИИ ---
 
 @bot.message_handler(commands=['reset'])
 def ask_reset(message):
@@ -167,8 +218,11 @@ def show_history_menu(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
+    if call.data.startswith("set_cur_"): return # Это обрабатывается в другом месте
+
     user_id = call.message.chat.id
     storage = get_user_storage(user_id)
+    cur = storage.get_currency()
     
     if call.data == "reset_confirm":
         storage.reset_data()
@@ -187,38 +241,44 @@ def handle_query(call):
             _, y, m = call.data.split("_")
             stats = storage.get_stats_by_month(int(y), int(m))
             if stats:
-                bot.send_photo(user_id, create_pie_chart(stats), caption=f"Отчет за {m}.{y}")
+                bot.send_photo(user_id, create_pie_chart(stats, cur), caption=f"Отчет за {m}.{y}")
             else:
                 bot.answer_callback_query(call.id, "Пусто.")
             bot.answer_callback_query(call.id)
         except: pass
+
+# --- ОБРАБОТКА СООБЩЕНИЙ ---
 
 @bot.message_handler(content_types=['text'])
 def process_expense(message):
     try:
         data = parse_input(message.text)
         storage = get_user_storage(message.chat.id)
+        cur = storage.get_currency()
+        
         storage.add_expense(data['category'], data['amount'], data['note'])
         
         status = storage.get_budget_status()
         note_text = f" ({data['note']})" if data['note'] else ""
         
-        reply = f"✅ {data['category']}: {data['amount']} ${note_text}\n"
+        reply = f"✅ {data['category']}: {data['amount']} {cur}{note_text}\n"
         
         if status['budget'] > 0:
             if status['remaining'] > 0:
-                reply += f"Остаток: {status['remaining']:.2f} $ (Лимит/день: {status['daily_limit']:.2f})"
+                reply += f"Остаток: {status['remaining']:,.0f} {cur} (Лимит/день: {status['daily_limit']:,.0f})"
             else:
-                reply += f"Перерасход: {abs(status['remaining']):.2f} $"
+                reply += f"Перерасход: {abs(status['remaining']):,.0f} {cur}"
         
         bot.reply_to(message, reply)
         
     except ValueError:
-        bot.reply_to(message, "Ошибка формата. Пример: `Такси 500`", parse_mode="Markdown")
-    except Exception:
+        bot.reply_to(message, "Не понял. Пиши так: `Такси 500`", parse_mode="Markdown")
+    except Exception as e:
+        print(f"Error: {e}")
         bot.reply_to(message, "Ошибка записи.")
 
 def run_bot():
-    print("Бот запущен. Обновляю меню команд...")
-    set_main_menu() # <--- ВОТ ЭТА МАГИЧЕСКАЯ СТРОЧКА СОЗДАЕТ МЕНЮ
+    print("Бот запущен. Обновляю меню...")
+    set_main_menu()
     bot.infinity_polling()
+
