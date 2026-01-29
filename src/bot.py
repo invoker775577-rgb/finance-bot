@@ -53,33 +53,43 @@ def send_welcome(message):
         "3. **Анализируй:**\n"
         "   Жми `/stats` — покажу графики и остаток.\n\n"
         f"💱 **Твоя валюта сейчас:** `{cur}`\n"
-        "(Чтобы сменить на рубли, динары или евро — жми `/currency`)\n\n"
+        "(Чтобы сменить на рубли, кроны, лари или фунты — жми `/currency`)\n\n"
         "👇 **Меню команд — в кнопке слева внизу.**"
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
-# --- СМЕНА ВАЛЮТЫ ---
+# --- СМЕНА ВАЛЮТЫ (ОБНОВЛЕНО) ---
 
 @bot.message_handler(commands=['currency'])
 def change_currency_menu(message):
     markup = InlineKeyboardMarkup()
-    # Популярные валюты
+    
+    # Ряд 1: Мировые
     btn1 = InlineKeyboardButton("🇺🇸 USD ($)", callback_data="set_cur_$")
     btn2 = InlineKeyboardButton("🇪🇺 EUR (€)", callback_data="set_cur_€")
+    
+    # Ряд 2: Рубли (РФ и РБ)
     btn3 = InlineKeyboardButton("🇷🇺 RUB (₽)", callback_data="set_cur_₽")
-    btn4 = InlineKeyboardButton("🇷🇸 RSD (din)", callback_data="set_cur_din")
-    btn5 = InlineKeyboardButton("🇧🇾 BYN (Br)", callback_data="set_cur_Br")
-    btn6 = InlineKeyboardButton("🇺🇦 UAH (₴)", callback_data="set_cur_₴")
+    btn4 = InlineKeyboardButton("🇧🇾 BYN (Br)", callback_data="set_cur_Br")
+    
+    # Ряд 3: Сербия и Чехия
+    btn5 = InlineKeyboardButton("🇷🇸 RSD (din)", callback_data="set_cur_din")
+    btn6 = InlineKeyboardButton("🇨🇿 CZK (Kč)", callback_data="set_cur_Kč")
+    
+    # Ряд 4: Грузия и Египет
+    btn7 = InlineKeyboardButton("🇬🇪 GEL (₾)", callback_data="set_cur_₾")
+    btn8 = InlineKeyboardButton("🇪🇬 EGP (E£)", callback_data="set_cur_E£")
     
     markup.add(btn1, btn2)
     markup.add(btn3, btn4)
     markup.add(btn5, btn6)
+    markup.add(btn7, btn8)
     
-    bot.send_message(message.chat.id, "💱 **В чем будем считать деньги?**\nВыберите из списка:", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "💱 **Выберите валюту учета:**", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("set_cur_"))
 def callback_set_currency(call):
-    # Получаем символ из callback_data (например set_cur_din -> din)
+    # Получаем символ из callback_data
     symbol = call.data.split("_")[2]
     storage = get_user_storage(call.message.chat.id)
     storage.set_currency(symbol)
@@ -87,7 +97,7 @@ def callback_set_currency(call):
     bot.answer_callback_query(call.id, f"Валюта установлена: {symbol}")
     bot.edit_message_text(f"✅ Готово! Теперь считаем в **{symbol}**.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
 
-# --- ОСТАЛЬНЫЕ КОМАНДЫ (С УЧЕТОМ ВАЛЮТЫ) ---
+# --- ОСТАЛЬНЫЕ КОМАНДЫ ---
 
 @bot.message_handler(commands=['salary'])
 def set_salary(message):
@@ -160,7 +170,7 @@ def show_records(message):
 def send_stats(message):
     user_id = message.chat.id
     storage = get_user_storage(user_id)
-    cur = storage.get_currency() # Узнаем валюту
+    cur = storage.get_currency()
     now = datetime.datetime.now()
     
     stats = storage.get_stats_by_month(now.year, now.month)
@@ -171,7 +181,6 @@ def send_stats(message):
         return
 
     try:
-        # Передаем валюту в генератор графика
         chart_file = create_pie_chart(stats, currency_symbol=cur)
         
         spent = budget_data['spent']
@@ -218,7 +227,7 @@ def show_history_menu(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
-    if call.data.startswith("set_cur_"): return # Это обрабатывается в другом месте
+    if call.data.startswith("set_cur_"): return
 
     user_id = call.message.chat.id
     storage = get_user_storage(user_id)
@@ -246,8 +255,6 @@ def handle_query(call):
                 bot.answer_callback_query(call.id, "Пусто.")
             bot.answer_callback_query(call.id)
         except: pass
-
-# --- ОБРАБОТКА СООБЩЕНИЙ ---
 
 @bot.message_handler(content_types=['text'])
 def process_expense(message):
@@ -280,5 +287,4 @@ def process_expense(message):
 def run_bot():
     print("Бот запущен. Обновляю меню...")
     set_main_menu()
-    bot.infinity_polling()
-
+    bot.infinity_polling()  
